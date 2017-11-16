@@ -9,7 +9,7 @@ In Sails, helpers are the recommended approach for pulling repeated code into a 
 For example, in the course of creating the actions that your Node.js/Sails app uses to respond to client requests, you will sometimes find yourself repeating code in several places.  That can be pretty bug-prone, of course, not to mention annoying.  Fortunately, there's a neat solution: replace the duplicate code with a call to a custom helper:
 
 ```javascript
-sails.helpers.formatWelcomeMessage({ name: 'Bubba' }).exec(function(err, greeting) {
+sails.helpers.formatWelcomeMessage({ name: 'Bubba' }).switch(function(err, greeting) {
   if (err) { return res.serverError(err); }
 
   // `greeting` is now "Hello, Bubba!"
@@ -91,7 +91,7 @@ Exits describe the different possible outcomes a helper can have.  Every helper 
 This helps guarantee your code&rsquo;s maintainability by providing strong conventions.  For example, a helper called &ldquo;Create user&rdquo; could expose a custom `usernameConflict` exit.  The helper's `fn` might trigger this special exit if the provided username already exists, allowing your userland code to handle this specific scenario after calling the helper without muddying up your result values or resorting to extra `try/catch/switch` blocks.
 
 ```javascript
-sails.helpers.createUser({ username: 'bubba123', email: 'bubba@hawtmail.com' }).exec({
+sails.helpers.createUser({ username: 'bubba123', email: 'bubba@hawtmail.com' }).switch({
   error: function(err) { return res.serverError(err); },
   usernameConflict: function() { return res.status(409).badRequest(); },
   success: function(newUserId) {
@@ -107,7 +107,7 @@ sails.helpers.createUser({ username: 'bubba123', email: 'bubba@hawtmail.com' }).
 
 By default, all helpers are considered _asynchronous_.  While this is a safe default assumption, it's not always true-- and when you know for certain that's the case, it's nice to avoid adding another level of indentation.  Sails helpers support this using the `sync` property.
 
-If you know all of the code inside your helper's `fn` is definitely synchronous, you can set the top-level `sync` property to `true`, which allows userland code to call the helper using [`execSync()`](http://sailsjs.com/documentation/concepts/helpers#?synchronous-usage) instead of `exec()`.
+If you know all of the code inside your helper's `fn` is definitely synchronous, you can set the top-level `sync` property to `true`, which allows userland code to call the helper using [`execSync()`](http://sailsjs.com/documentation/concepts/helpers#?synchronous-usage) instead of `switch()`.
 
 When your helper is invoked with `execSync()`, then any result data that your `fn`'s code passes in to `exits.success()` is _returned_ instead of being provided as an argument to the callback.  And, when its being called synchronously, if your helper's `fn` calls any exit other than `success`, then it will throw an Error.
 
@@ -153,7 +153,7 @@ This will create a file `api/helpers/foo-bar.js` that can be accessed in your co
 Whenever a Sails app loads, it finds all of the files in `api/helpers`, compiles them into functions, and stores them in the `sails.helpers` dictionary using the camel-cased version of the filename.  Any helper can then be invoked from your code, simply by calling it with a dictionary of values (one key for each input), and providing a standard Node.js callback function:
 
 ```javascript
-sails.helpers.formatWelcomeMessage({ name: 'Dolly' }).exec(function(err, result) {
+sails.helpers.formatWelcomeMessage({ name: 'Dolly' }).switch(function(err, result) {
   if (err) { /*...handle error and return...*/ return res.serverError(err); }
   /* ...process result... */
   sails.log('Ok it worked!  The result is:', result);
@@ -186,12 +186,12 @@ For more granular error handling (and for those exceptional cases that aren't _q
 Fortunately, Sails helpers take things a couple of steps further.
 
 ##### Traditional error negotiation
-When invoking a helper, if you pass in a classic Node callback when you call `.exec()` (or if you use `.execSync()`) then the Error instance might have a property called `exit`.  If set, it will be the name of the exit that the helper's implementation (`fn`) called when it exited.  (And if it's not set, it just means that the helper exited via the `error` exit.)
+When invoking a helper, if you pass in a classic Node callback when you call `.switch()` (or if you use `.execSync()`) then the Error instance might have a property called `exit`.  If set, it will be the name of the exit that the helper's implementation (`fn`) called when it exited.  (And if it's not set, it just means that the helper exited via the `error` exit.)
 
 For example, with asynchronous (non-blocking) usage:
 
 ```javascript
-sails.helpers.getGravatarUrl(/*...*/).exec(function (err, gravatarUrl) {
+sails.helpers.getGravatarUrl(/*...*/).switch(function (err, gravatarUrl) {
   if (err) {
     if (err.exit === 'invalidEmail') { return res.badRequest(); }
     return res.serverError(err);
@@ -220,11 +220,11 @@ return res.ok();
 
 ##### Switchback-style error negotiation
 
-For convenience, there's another, even easier way to negotiate errors from an asynchronous helper.  Instead of a Node.js callback, you can simply pass `.exec()` a dictionary of exit handlers (a.k.a. a "switchback"):
+For convenience, there's another, even easier way to negotiate errors from an asynchronous helper.  Instead of a Node.js callback, you can simply pass `.switch()` a dictionary of exit handlers (a.k.a. a "switchback"):
 
 ```javascript
 sails.helpers.getGravatarUrl({ emailAddress: req.param('email') })
-.exec({
+.switch({
   error: function(err) { return res.serverError(err); },
   invalidEmail: function (err) { return res.badRequest(); },
   success: function(gravatarUrl) {
@@ -241,10 +241,10 @@ While this example usage is kind of trumped-up, it's easy to see a scenario wher
 Luckily, Sails helpers support "automatic exit forwarding".  That means userland code can choose to integrate with _as few or as many custom exits as you like_, on a case by case basis.  In other words, when you're calling a helper, it's OK to completely ignore its custom `invalidEmail` exit if you don't need it.  That way, your code remains as concise and intuitive as possible.  And if things change, you can always come back and hook some code up to handle the custom exit later.
 
 In the mean time, when custom exits _aren't_ handled explicitly, the behavior of helpers is still well-defined.  For example, here's a breakdown of what happens (under various usage conditions) when our helper's `fn` triggers its custom "invalidEmail" exit:
-+ if called using `.exec(function(err){...})` -- i.e. a Node.js-style callback -- then that userland callback function would be triggered with an automatically-generated Error instance as its first argument
++ if called using `.switch(function(err){...})` -- i.e. a Node.js-style callback -- then that userland callback function would be triggered with an automatically-generated Error instance as its first argument
 + if called using `.execSync()`, then since this is synchronous usage, our helper would throw an automatically-generated Error.
-+ if called using `.exec({...})`, a switchback, but where the switchback _does not include an exit handler_ for `invalidEmail`, then the `error` exit handler would be triggered instead (again, with an automatically-generated Error instance as its first argument).
-+ if called using `.exec({...})`, a switchback that _includes a dedicated exit handler_ for `invalidEmail`, then that dedicated handler function would be triggered.
++ if called using `.switch({...})`, a switchback, but where the switchback _does not include an exit handler_ for `invalidEmail`, then the `error` exit handler would be triggered instead (again, with an automatically-generated Error instance as its first argument).
++ if called using `.switch({...})`, a switchback that _includes a dedicated exit handler_ for `invalidEmail`, then that dedicated handler function would be triggered.
 
 ### Next steps
 
